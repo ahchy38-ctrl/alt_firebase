@@ -12,54 +12,46 @@ def main():
         "FIREBASE_SERVICE_ACCOUNT_JSON"
     )
     database_url = os.environ.get("FIREBASE_DATABASE_URL")
+    firebase_path = os.environ.get("FIREBASE_PATH", "/backups")
 
-    if not service_account_json:
+    if not service_account_json or not database_url:
+        raise RuntimeError("Firebase secrets are missing.")
+
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(
+            credentials.Certificate(json.loads(service_account_json)),
+            {"databaseURL": database_url},
+        )
+
+    data = db.reference(firebase_path).get()
+
+    if not isinstance(data, dict) or not data:
         raise RuntimeError(
-            "Missing FIREBASE_SERVICE_ACCOUNT_JSON secret"
+            f"No backup records found at {firebase_path}. "
+            "Existing export was not changed."
         )
 
-    if not database_url:
-        raise RuntimeError(
-            "Missing FIREBASE_DATABASE_URL secret"
-        )
+    output = Path("data/backups.json")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".json.tmp")
 
-    # Authenticate using the service account stored in GitHub Secrets.
-    service_account = json.loads(service_account_json)
-    cred = credentials.Certificate(service_account)
+    try:
+        with temporary.open("w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+            file.write("\n")
 
-    firebase_admin.initialize_app(
-        cred,
-        {"databaseURL": database_url},
-    )
+        # Validate before replacing the existing export.
+        with temporary.open("r", encoding="utf-8") as file:
+            json.load(file)
 
-    # "/" exports the entire Realtime Database.
-    # Set FIREBASE_PATH to export only a particular node.
-    firebase_path = os.environ.get("FIREBASE_PATH", "/")
-    firebase_path = firebase_path.strip("/")
+        temporary.replace(output)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
-    reference = db.reference(firebase_path or "/")
-    data = reference.get()
-
-    if data is None:
-        raise RuntimeError(
-            "Firebase returned no data. "
-            "Check the database path and source data."
-        )
-
-    output_file = Path("data/firebase_data.json")
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    with output_file.open("w", encoding="utf-8") as file:
-        json.dump(
-            data,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
-        file.write("\n")
-
-    print(f"Firebase export completed: {output_file}")
-    print(f"Exported root/path: /{firebase_path}")
+    print(f"Exported Firebase path: {firebase_path}")
+    print(f"UUID records exported: {len(data)}")
+    print(f"Output file size: {output.stat().st_size} bytes")
 
 
 if __name__ == "__main__":
