@@ -1,1 +1,14 @@
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local credentials
+.env
+serviceAccountKey.json
+firebase-service-account.json
+
+# Temporary exports
+data/*.json.tmp
+
